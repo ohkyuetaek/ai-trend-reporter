@@ -1,0 +1,23 @@
+name: Daily AI Briefing
+
+on:
+  schedule:
+    # 오전 7시 KST = UTC 22:00 (전날)
+    - cron: '0 22 * * 0-4'  # 일~목 22:00 UTC = 월~금 07:00 KST
+  workflow_dispatch: # 수동 실행 가능
+
+jobs:
+  briefing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: python main.py
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
