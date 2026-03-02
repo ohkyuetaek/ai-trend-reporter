@@ -54,7 +54,7 @@ def summarize_articles(articles: list[dict]) -> dict:
     prompt = PROMPT_TEMPLATE.format(articles_text=articles_text)
 
     response = client.models.generate_content(
-        model="gemini-1.5-flash",
+        model="gemini-2.0-flash-lite",
         contents=prompt,
     )
 
