@@ -44,7 +44,11 @@ def summarize_articles(articles: list[dict]) -> dict:
         articles_text += f"\n### {i}. {article['title']}\n"
         articles_text += f"URL: {article['url']}\n"
         if article.get("tags"):
-            articles_text += f"태그: {', '.join(article['tags'])}\n"
+            tag_names = [
+                t["name"] if isinstance(t, dict) else str(t)
+                for t in article["tags"]
+            ]
+            articles_text += f"태그: {', '.join(tag_names)}\n"
         articles_text += f"본문:\n{article['content'][:3000]}\n"
 
     prompt = PROMPT_TEMPLATE.format(articles_text=articles_text)

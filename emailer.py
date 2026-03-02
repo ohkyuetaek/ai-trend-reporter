@@ -41,9 +41,9 @@ def build_html(summary_data: dict, articles: list[dict], date_range: str) -> str
 
 def send_email(subject: str, html_body: str):
     """Gmail SMTP로 이메일 발송"""
-    gmail_address = os.environ["GMAIL_ADDRESS"]
-    gmail_password = os.environ["GMAIL_APP_PASSWORD"]
-    recipient = os.environ["RECIPIENT_EMAIL"]
+    gmail_address = os.environ["GMAIL_ADDRESS"].strip().replace("\xa0", "")
+    gmail_password = os.environ["GMAIL_APP_PASSWORD"].strip().replace("\xa0", "")
+    recipient = os.environ["RECIPIENT_EMAIL"].strip().replace("\xa0", "")
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
