@@ -3,7 +3,7 @@
 import json
 import os
 
-from google import genai
+from groq import Groq
 
 PROMPT_TEMPLATE = """\
 당신은 AI/ML 기술 트렌드 분석가입니다.
@@ -36,8 +36,8 @@ PROMPT_TEMPLATE = """\
 
 
 def summarize_articles(articles: list[dict]) -> dict:
-    """Gemini를 사용하여 글 일괄 요약"""
-    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    """Groq을 사용하여 글 일괄 요약"""
+    client = Groq(api_key=os.environ["GROQ_API_KEY"])
 
     articles_text = ""
     for i, article in enumerate(articles, 1):
@@ -53,12 +53,12 @@ def summarize_articles(articles: list[dict]) -> dict:
 
     prompt = PROMPT_TEMPLATE.format(articles_text=articles_text)
 
-    response = client.models.generate_content(
-        model="gemini-2.0-flash-lite",
-        contents=prompt,
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[{"role": "user", "content": prompt}],
     )
 
-    text = response.text.strip()
+    text = response.choices[0].message.content.strip()
     if text.startswith("```"):
         text = text.split("\n", 1)[1]
         text = text.rsplit("```", 1)[0]
