@@ -4,6 +4,10 @@ import sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from emailer import build_html, send_email
 from scraper import get_date_range, scrape_articles
 from summarizer import summarize_articles
