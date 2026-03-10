@@ -93,6 +93,7 @@ def scrape_articles() -> list[dict]:
                     "content": content,
                     "created_at": created_at.isoformat(),
                     "tags": topic.get("tags", []),
+                    "source": "pytorch_kr",
                 }
             )
 

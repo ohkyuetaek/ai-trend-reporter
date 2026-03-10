@@ -12,28 +12,70 @@ def _load_template() -> str:
     return template_path.read_text(encoding="utf-8")
 
 
-def build_html(summary_data: dict, articles: list[dict], date_range: str) -> str:
-    """요약 데이터를 HTML 이메일 본문으로 변환"""
+SOURCE_CONFIG = {
+    "pytorch_kr": {
+        "label": "PyTorch KR",
+        "color": "#ee4c2c",
+        "icon": "🔥",
+    },
+    "geeknews": {
+        "label": "GeekNews",
+        "color": "#6b48ff",
+        "icon": "💡",
+    },
+}
+
+
+def _build_article_card(orig: dict, summ: dict, border_color: str) -> str:
+    keywords = ", ".join(summ.get("keywords", []))
+    return (
+        f'<div style="margin-bottom:20px;padding:15px;background:#f8f9fa;'
+        f'border-radius:8px;border-left:4px solid {border_color};">'
+        f'<h3 style="margin:0 0 8px 0;">'
+        f'<a href="{orig["url"]}" style="color:#1a73e8;text-decoration:none;">'
+        f"{summ['title']}</a></h3>"
+        f'<p style="margin:0 0 8px 0;color:#333;line-height:1.6;">'
+        f"{summ['summary']}</p>"
+        f'<p style="margin:0;color:#666;font-size:13px;">'
+        f"🏷️ {keywords}</p></div>"
+    )
+
+
+def build_html(
+    summary_data: dict,
+    all_articles: list[dict],
+    articles_by_source: dict[str, list[dict]],
+    date_range: str,
+) -> str:
+    """요약 데이터를 HTML 이메일 본문으로 변환 (다중 소스 지원)"""
     template = _load_template()
 
-    articles_html = ""
-    for orig, summ in zip(articles, summary_data.get("articles", [])):
-        keywords = ", ".join(summ.get("keywords", []))
-        articles_html += (
-            '<div style="margin-bottom:20px;padding:15px;background:#f8f9fa;'
-            'border-radius:8px;border-left:4px solid #4285f4;">'
-            "<h3 style=\"margin:0 0 8px 0;\">"
-            f'<a href="{orig["url"]}" style="color:#1a73e8;text-decoration:none;">'
-            f"{summ['title']}</a></h3>"
-            f'<p style="margin:0 0 8px 0;color:#333;line-height:1.6;">'
-            f"{summ['summary']}</p>"
-            f'<p style="margin:0;color:#666;font-size:13px;">'
-            f"🏷️ {keywords}</p></div>"
+    # 요약 결과를 제목 기준으로 매칭
+    summary_by_title = {s["title"]: s for s in summary_data.get("articles", [])}
+
+    sections_html = ""
+    for source, articles in articles_by_source.items():
+        config = SOURCE_CONFIG.get(source, SOURCE_CONFIG["pytorch_kr"])
+
+        sections_html += (
+            f'<div style="margin-bottom:30px;">'
+            f'<h2 style="color:#333;font-size:18px;margin:0 0 12px 0;">'
+            f'{config["icon"]} {config["label"]} ({len(articles)}개)</h2>'
         )
 
+        for orig in articles:
+            summ = summary_by_title.get(orig["title"], {
+                "title": orig["title"],
+                "summary": orig.get("content", "")[:200],
+                "keywords": [],
+            })
+            sections_html += _build_article_card(orig, summ, config["color"])
+
+        sections_html += "</div>"
+
     html = template.replace("{{trend_summary}}", summary_data.get("trend_summary", ""))
-    html = html.replace("{{articles}}", articles_html)
-    html = html.replace("{{article_count}}", str(len(articles)))
+    html = html.replace("{{articles_sections}}", sections_html)
+    html = html.replace("{{article_count}}", str(len(all_articles)))
     html = html.replace("{{date_range}}", date_range)
 
     return html
