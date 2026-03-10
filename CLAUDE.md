@@ -8,7 +8,7 @@
 
 - **언어:** Python 3.12
 - **데이터 수집:** Discourse API (https://discuss.pytorch.kr/c/news/14.json)
-- **LLM 요약:** Google Gemini Flash (무료 티어) — `google-genai` 패키지 사용
+- **LLM 요약:** Groq Llama-3.3-70b (무료 티어) — `groq` 패키지 사용
 - **이메일 발송:** Gmail SMTP (smtplib, 표준라이브러리)
 - **스케줄링:** GitHub Actions (daily cron)
 - **비용:** $0 (모두 무료 티어)
@@ -47,12 +47,12 @@
 3. 📊 통계
    - 총 N개 글 수집 (YYYY-MM-DD ~ YYYY-MM-DD)
 
-4. 하단에 "이 브리핑은 AI(Gemini)가 자동 생성했습니다." 고지
+4. 하단에 "이 브리핑은 AI(Groq/Llama)가 자동 생성했습니다." 고지
 ```
 
-## Gemini 프롬프트 설계
+## LLM 프롬프트 설계
 
-글 본문들을 모아 Gemini에 한 번에 보내서 요약. 프롬프트:
+글 본문들을 모아 Groq에 한 번에 보내서 요약. 프롬프트:
 
 ```
 당신은 AI/ML 기술 트렌드 분석가입니다.
@@ -108,7 +108,7 @@ jobs:
       - run: pip install -r requirements.txt
       - run: python main.py
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
@@ -118,7 +118,7 @@ jobs:
 
 | Secret 이름 | 값 |
 |---|---|
-| `GEMINI_API_KEY` | Google AI Studio에서 발급한 API 키 |
+| `GROQ_API_KEY` | Groq Console에서 발급한 API 키 |
 | `GMAIL_ADDRESS` | 발신용 Gmail 주소 |
 | `GMAIL_APP_PASSWORD` | Gmail 앱 비밀번호 (16자리) |
 | `RECIPIENT_EMAIL` | `kyuetaek.oh@samsung.com` |
@@ -129,10 +129,10 @@ jobs:
 pytorch-kr-briefing/
 ├── CLAUDE.md
 ├── README.md
-├── requirements.txt          # google-genai, requests
+├── requirements.txt          # groq, requests
 ├── main.py                   # 엔트리포인트 (오케스트레이션)
 ├── scraper.py                # Discourse API 크롤링
-├── summarizer.py             # Gemini API 요약
+├── summarizer.py             # Groq API 요약
 ├── emailer.py                # Gmail SMTP 발송
 ├── templates/
 │   └── briefing.html         # 이메일 HTML 템플릿
@@ -144,7 +144,7 @@ pytorch-kr-briefing/
 ## 구현 시 주의사항
 
 1. **Discourse API 요청 시 User-Agent 헤더 필수** — 없으면 403 가능
-2. **Gemini 무료 티어 제한:** 분당 15회, 일 1,500회 — 글 본문을 하나씩 보내지 말고, 한 번에 배치로 보낼 것
+2. **Groq 무료 티어 제한:** 분당 30회, 일 14,400회 — 글 본문을 하나씩 보내지 말고, 한 번에 배치로 보낼 것
 3. **글 본문 크롤링:** 목록 API에는 본문이 없음. 각 topic의 first post를 별도 요청해야 함. `cooked` 필드에 HTML 본문이 있으니 텍스트만 추출
 4. **월요일 판별:** Python에서 `datetime.now(KST).weekday() == 0`이면 월요일
 5. **신규 글 없을 경우:** "오늘은 새로운 글이 없습니다"라는 간단한 이메일만 발송
@@ -155,7 +155,7 @@ pytorch-kr-briefing/
 ## 실행 방법 (로컬 테스트)
 
 ```bash
-export GEMINI_API_KEY="your-key"
+export GROQ_API_KEY="your-key"
 export GMAIL_ADDRESS="your-gmail"
 export GMAIL_APP_PASSWORD="your-app-password"
 export RECIPIENT_EMAIL="kyuetaek.oh@samsung.com"
