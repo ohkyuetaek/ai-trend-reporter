@@ -3,10 +3,11 @@
 import time
 import xml.etree.ElementTree as ET
 from datetime import datetime
-from html.parser import HTMLParser
 from zoneinfo import ZoneInfo
 
 import requests
+
+from scraper import _strip_html
 
 KST = ZoneInfo("Asia/Seoul")
 RSS_URL = "https://news.hada.io/rss/news"
@@ -15,26 +16,6 @@ MAX_RETRIES = 3
 
 # Atom 네임스페이스
 ATOM_NS = "{http://www.w3.org/2005/Atom}"
-
-
-class _HTMLTextExtractor(HTMLParser):
-    """HTML에서 텍스트만 추출"""
-
-    def __init__(self):
-        super().__init__()
-        self._parts: list[str] = []
-
-    def handle_data(self, data):
-        self._parts.append(data)
-
-    def get_text(self) -> str:
-        return " ".join(self._parts).strip()
-
-
-def _strip_html(html: str) -> str:
-    extractor = _HTMLTextExtractor()
-    extractor.feed(html)
-    return extractor.get_text()
 
 
 def _fetch_rss() -> ET.Element:

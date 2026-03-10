@@ -1,5 +1,6 @@
 """Discourse API를 통한 PyTorch KR 뉴스 크롤링"""
 
+import re
 import time
 from datetime import datetime, timedelta
 from html.parser import HTMLParser
@@ -13,19 +14,61 @@ CATEGORY_URL = f"{BASE_URL}/c/news/14.json"
 HEADERS = {"User-Agent": "PyTorchKR-Briefing-Bot/1.0"}
 MAX_RETRIES = 3
 
+_BLOCK_TAGS = {"p", "div", "blockquote", "pre", "tr", "table"}
+_HEADING_TAGS = {"h1", "h2", "h3", "h4", "h5", "h6"}
+_HEADING_PREFIX = {"h1": "# ", "h2": "## ", "h3": "### ", "h4": "#### ", "h5": "##### ", "h6": "###### "}
+_SKIP_TAGS = {"script", "style", "nav", "footer", "header"}
+
 
 class _HTMLTextExtractor(HTMLParser):
-    """HTML에서 텍스트만 추출"""
+    """HTML에서 구조를 보존하며 텍스트 추출"""
 
     def __init__(self):
         super().__init__()
         self._parts: list[str] = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        tag = tag.lower()
+        if tag in _SKIP_TAGS:
+            self._skip_depth += 1
+            return
+        if self._skip_depth:
+            return
+        if tag in _BLOCK_TAGS:
+            self._parts.append("\n")
+        elif tag in _HEADING_TAGS:
+            self._parts.append("\n")
+            self._parts.append(_HEADING_PREFIX[tag])
+        elif tag == "li":
+            self._parts.append("\n- ")
+        elif tag == "br":
+            self._parts.append("\n")
+
+    def handle_endtag(self, tag):
+        tag = tag.lower()
+        if tag in _SKIP_TAGS:
+            self._skip_depth = max(0, self._skip_depth - 1)
+            return
+        if self._skip_depth:
+            return
+        if tag in _BLOCK_TAGS or tag in _HEADING_TAGS:
+            self._parts.append("\n")
+
+    def handle_startendtag(self, tag, attrs):
+        if tag.lower() == "br" and not self._skip_depth:
+            self._parts.append("\n")
 
     def handle_data(self, data):
-        self._parts.append(data)
+        if not self._skip_depth:
+            self._parts.append(data)
 
     def get_text(self) -> str:
-        return " ".join(self._parts).strip()
+        text = "".join(self._parts)
+        text = re.sub(r"[ \t]+", " ", text)
+        text = re.sub(r" *\n *", "\n", text)
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        return text.strip()
 
 
 def _strip_html(html: str) -> str:

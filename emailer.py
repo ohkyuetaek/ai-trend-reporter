@@ -47,11 +47,15 @@ def build_html(
     articles_by_source: dict[str, list[dict]],
     date_range: str,
 ) -> str:
-    """요약 데이터를 HTML 이메일 본문으로 변환 (다중 소스 지원)"""
+    """요약 데이터를 HTML 이메일 본문으로 변환 (인덱스 기반 매칭)"""
     template = _load_template()
 
-    # 요약 결과를 제목 기준으로 매칭
-    summary_by_title = {s["title"]: s for s in summary_data.get("articles", [])}
+    # all_articles의 인덱스 순서로 요약 매칭 (dict 순회 순서에 의존하지 않음)
+    summaries = summary_data.get("articles", [])
+    summary_by_id = {}
+    for i, article in enumerate(all_articles):
+        if i < len(summaries):
+            summary_by_id[id(article)] = summaries[i]
 
     sections_html = ""
     for source, articles in articles_by_source.items():
@@ -64,11 +68,15 @@ def build_html(
         )
 
         for orig in articles:
-            summ = summary_by_title.get(orig["title"], {
-                "title": orig["title"],
-                "summary": orig.get("content", "")[:200],
-                "keywords": [],
-            })
+            matched = summary_by_id.get(id(orig))
+            if matched:
+                summ = {**matched, "title": orig["title"]}
+            else:
+                summ = {
+                    "title": orig["title"],
+                    "summary": orig.get("content", "")[:200],
+                    "keywords": [],
+                }
             sections_html += _build_article_card(orig, summ, config["color"])
 
         sections_html += "</div>"
