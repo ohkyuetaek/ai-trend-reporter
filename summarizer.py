@@ -106,4 +106,4 @@ def summarize_articles(articles: list[dict]) -> dict:
         text = text.split("\n", 1)[1]
         text = text.rsplit("```", 1)[0]
 
-    return json.loads(text)
+    return json.loads(text, strict=False)
