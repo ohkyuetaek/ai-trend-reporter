@@ -92,7 +92,7 @@ def build_html(
 def send_email(subject: str, html_body: str):
     """Gmail SMTP로 이메일 발송"""
     gmail_address = os.environ["GMAIL_ADDRESS"].strip().replace("\xa0", "")
-    gmail_password = os.environ["GMAIL_APP_PASSWORD"].strip().replace("\xa0", "")
+    gmail_password = os.environ["GMAIL_APP_PASSWORD"].strip().replace("\xa0", "").replace(" ", "")
     recipient = os.environ["RECIPIENT_EMAIL"].strip().replace("\xa0", "")
 
     msg = MIMEMultipart("alternative")
