@@ -3,6 +3,7 @@
 import json
 import os
 import re
+import time
 import unicodedata
 
 from groq import Groq
@@ -131,37 +132,53 @@ def _reorder_summaries(
     return reordered
 
 
-def summarize_articles(articles: list[dict]) -> dict:
-    """Groq을 사용하여 글 일괄 요약"""
-    client = Groq(api_key=os.environ["GROQ_API_KEY"])
+BATCH_SIZE = 15  # 배치당 최대 글 수 (출력 토큰 초과 방지)
 
+TREND_PROMPT_TEMPLATE = """\
+당신은 AI/ML 및 기술 트렌드 분석가입니다.
+아래는 여러 기술 커뮤니티 게시글의 개별 요약입니다.
+
+전체를 종합하여 오늘의 AI/ML 및 기술 트렌드를 3~5문장으로 정리하세요.
+- 공통 주제, 기술적 흐름, 주목할 변화를 분석하세요.
+
+한국어로, 반드시 아래 JSON 형식으로 응답하세요.
+
+{{"trend_summary": "전체 트렌드 종합..."}}
+
+---
+요약 목록 ({count}개):
+{summaries_text}
+"""
+
+
+def _build_articles_text(articles: list[dict], start_id: int = 1) -> str:
+    """글 목록을 프롬프트용 텍스트로 변환"""
     source_labels = {
         "pytorch_kr": "PyTorch KR",
         "geeknews": "GeekNews",
     }
-
-    articles_text = ""
-    for i, article in enumerate(articles, 1):
+    text = ""
+    for i, article in enumerate(articles, start_id):
         source = article.get("source", "pytorch_kr")
-        articles_text += f"\n### 글 {i}/{len(articles)} (article_id={i}). [{source_labels.get(source, source)}] {article['title']}\n"
-        articles_text += f"URL: {article['url']}\n"
+        text += f"\n### 글 {i} (article_id={i}). [{source_labels.get(source, source)}] {article['title']}\n"
+        text += f"URL: {article['url']}\n"
         if article.get("tags"):
             tag_names = [
                 t["name"] if isinstance(t, dict) else str(t)
                 for t in article["tags"]
             ]
-            articles_text += f"태그: {', '.join(tag_names)}\n"
-        articles_text += f"본문:\n{_smart_truncate(article['content'])}\n"
+            text += f"태그: {', '.join(tag_names)}\n"
+        text += f"본문:\n{_smart_truncate(article['content'])}\n"
+    return text
 
-    prompt = PROMPT_TEMPLATE.format(
-        articles_text=articles_text,
-        article_count=len(articles),
-    )
 
+def _call_groq(client: Groq, prompt: str) -> dict:
+    """Groq API 호출 후 JSON 파싱"""
     response = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.3,
+        max_tokens=8192,
         response_format={"type": "json_object"},
     )
 
@@ -170,9 +187,52 @@ def summarize_articles(articles: list[dict]) -> dict:
         text = text.split("\n", 1)[1]
         text = text.rsplit("```", 1)[0]
 
-    result = json.loads(text, strict=False)
+    return json.loads(text, strict=False)
 
-    # LLM 응답 순서가 입력과 다를 수 있으므로, article_id → 제목 유사도 순으로 매칭
-    result["articles"] = _reorder_summaries(articles, result.get("articles", []))
 
-    return result
+def summarize_articles(articles: list[dict]) -> dict:
+    """Groq을 사용하여 글 일괄 요약. 글이 많으면 배치 분할."""
+    client = Groq(api_key=os.environ["GROQ_API_KEY"])
+
+    # 배치 분할
+    batches = [
+        articles[i : i + BATCH_SIZE]
+        for i in range(0, len(articles), BATCH_SIZE)
+    ]
+
+    all_summaries: list[dict] = []
+
+    for batch_idx, batch in enumerate(batches):
+        if batch_idx > 0:
+            time.sleep(5)  # Groq 무료 티어 rate limit 대비
+        start_id = batch_idx * BATCH_SIZE + 1
+        articles_text = _build_articles_text(batch, start_id)
+
+        prompt = PROMPT_TEMPLATE.format(
+            articles_text=articles_text,
+            article_count=len(batch),
+        )
+
+        result = _call_groq(client, prompt)
+        batch_summaries = _reorder_summaries(batch, result.get("articles", []))
+        all_summaries.extend(batch_summaries)
+
+    # 배치가 1개면 트렌드 요약을 그대로 사용, 여러 배치면 통합 트렌드 생성
+    if len(batches) == 1:
+        trend_summary = result.get("trend_summary", "")
+    else:
+        summaries_text = ""
+        for i, s in enumerate(all_summaries, 1):
+            summaries_text += f"{i}. {s.get('title', '')}: {s.get('summary', '')}\n"
+
+        trend_prompt = TREND_PROMPT_TEMPLATE.format(
+            count=len(all_summaries),
+            summaries_text=summaries_text,
+        )
+        trend_result = _call_groq(client, trend_prompt)
+        trend_summary = trend_result.get("trend_summary", "")
+
+    return {
+        "trend_summary": trend_summary,
+        "articles": all_summaries,
+    }
