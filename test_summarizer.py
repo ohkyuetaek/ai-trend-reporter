@@ -94,3 +94,156 @@ class TestReorderSummaries:
         assert len(result) == 2
         assert result[0]["title"] == "글A"
         assert result[1]["title"] == "글B"
+
+
+class TestProviderFallback:
+    def _article(self):
+        return {
+            "title": "테스트 글",
+            "url": "https://example.com/a",
+            "content": "PyTorch가 새 기능을 발표했다.",
+            "source": "pytorch_kr",
+        }
+
+    def test_ollama_success_does_not_call_groq(self, monkeypatch):
+        """Ollama가 유효한 JSON을 반환하면 Groq fallback을 호출하지 않는다."""
+        import summarizer
+
+        calls = []
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        monkeypatch.setenv("LLM_FALLBACK_PROVIDER", "groq")
+
+        def fake_ollama(prompt):
+            calls.append("ollama")
+            return {
+                "trend_summary": "로컬 요약 성공",
+                "articles": [
+                    {
+                        "article_id": 1,
+                        "title": "테스트 글",
+                        "summary": "새 기능 발표 요약",
+                        "keywords": ["PyTorch"],
+                    }
+                ],
+            }
+
+        def fake_groq(client, prompt):
+            calls.append("groq")
+            raise AssertionError("Groq should not be called")
+
+        monkeypatch.setattr(summarizer, "_call_ollama", fake_ollama)
+        monkeypatch.setattr(summarizer, "_call_groq", fake_groq)
+
+        result = summarizer.summarize_articles([self._article()])
+
+        assert result["trend_summary"] == "로컬 요약 성공"
+        assert result["articles"][0]["summary"] == "새 기능 발표 요약"
+        assert calls == ["ollama"]
+
+    def test_ollama_failure_falls_back_to_groq(self, monkeypatch):
+        """Ollama 호출이 실패하면 Groq provider로 재시도한다."""
+        import summarizer
+
+        calls = []
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        monkeypatch.setenv("LLM_FALLBACK_PROVIDER", "groq")
+        monkeypatch.setenv("GROQ_API_KEY", "dummy")
+
+        def fake_ollama(prompt):
+            calls.append("ollama")
+            raise RuntimeError("local model unavailable")
+
+        def fake_groq(client, prompt):
+            calls.append("groq")
+            return {
+                "trend_summary": "Groq fallback 성공",
+                "articles": [
+                    {
+                        "article_id": 1,
+                        "title": "테스트 글",
+                        "summary": "fallback 요약",
+                        "keywords": ["fallback"],
+                    }
+                ],
+            }
+
+        monkeypatch.setattr(summarizer, "_call_ollama", fake_ollama)
+        monkeypatch.setattr(summarizer, "_call_groq", fake_groq)
+
+        result = summarizer.summarize_articles([self._article()])
+
+        assert result["trend_summary"] == "Groq fallback 성공"
+        assert result["articles"][0]["summary"] == "fallback 요약"
+        assert calls == ["ollama", "groq"]
+
+    def test_invalid_ollama_shape_falls_back_to_groq(self, monkeypatch):
+        """Ollama가 JSON은 반환했지만 필수 shape가 없으면 fallback한다."""
+        import summarizer
+
+        calls = []
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        monkeypatch.setenv("LLM_FALLBACK_PROVIDER", "groq")
+        monkeypatch.setenv("GROQ_API_KEY", "dummy")
+
+        def fake_ollama(prompt):
+            calls.append("ollama")
+            return {"message": "not expected shape"}
+
+        def fake_groq(client, prompt):
+            calls.append("groq")
+            return {
+                "trend_summary": "shape fallback 성공",
+                "articles": [
+                    {
+                        "article_id": 1,
+                        "title": "테스트 글",
+                        "summary": "shape fallback 요약",
+                        "keywords": ["shape"],
+                    }
+                ],
+            }
+
+        monkeypatch.setattr(summarizer, "_call_ollama", fake_ollama)
+        monkeypatch.setattr(summarizer, "_call_groq", fake_groq)
+
+        result = summarizer.summarize_articles([self._article()])
+
+        assert result["trend_summary"] == "shape fallback 성공"
+        assert result["articles"][0]["summary"] == "shape fallback 요약"
+        assert calls == ["ollama", "groq"]
+
+    def test_empty_ollama_articles_falls_back_to_groq(self, monkeypatch):
+        """Ollama가 articles를 누락하면 원문 폴백 대신 Groq fallback을 사용한다."""
+        import summarizer
+
+        calls = []
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        monkeypatch.setenv("LLM_FALLBACK_PROVIDER", "groq")
+        monkeypatch.setenv("GROQ_API_KEY", "dummy")
+
+        def fake_ollama(prompt):
+            calls.append("ollama")
+            return {"trend_summary": "불완전", "articles": []}
+
+        def fake_groq(client, prompt):
+            calls.append("groq")
+            return {
+                "trend_summary": "empty articles fallback 성공",
+                "articles": [
+                    {
+                        "article_id": 1,
+                        "title": "테스트 글",
+                        "summary": "empty articles fallback 요약",
+                        "keywords": ["empty"],
+                    }
+                ],
+            }
+
+        monkeypatch.setattr(summarizer, "_call_ollama", fake_ollama)
+        monkeypatch.setattr(summarizer, "_call_groq", fake_groq)
+
+        result = summarizer.summarize_articles([self._article()])
+
+        assert result["trend_summary"] == "empty articles fallback 성공"
+        assert result["articles"][0]["summary"] == "empty articles fallback 요약"
+        assert calls == ["ollama", "groq"]

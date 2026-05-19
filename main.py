@@ -56,7 +56,7 @@ def main():
         )
         return
 
-    # 3. Groq 요약
+    # 3. LLM 요약 (Ollama/Groq provider 설정에 따름)
     try:
         summary = summarize_articles(all_articles)
         print("  요약 완료")

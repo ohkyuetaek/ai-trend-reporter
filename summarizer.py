@@ -5,6 +5,9 @@ import os
 import re
 import time
 import unicodedata
+import urllib.error
+import urllib.request
+from typing import Optional
 
 from groq import Groq
 
@@ -175,7 +178,7 @@ def _build_articles_text(articles: list[dict], start_id: int = 1) -> str:
 def _call_groq(client: Groq, prompt: str) -> dict:
     """Groq API 호출 후 JSON 파싱"""
     response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+        model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
         messages=[{"role": "user", "content": prompt}],
         temperature=0.3,
         max_tokens=8192,
@@ -183,6 +186,11 @@ def _call_groq(client: Groq, prompt: str) -> dict:
     )
 
     text = response.choices[0].message.content.strip()
+    return _parse_json_text(text)
+
+
+def _parse_json_text(text: str) -> dict:
+    """LLM 응답 텍스트에서 JSON 객체를 파싱"""
     if text.startswith("```"):
         text = text.split("\n", 1)[1]
         text = text.rsplit("```", 1)[0]
@@ -190,9 +198,116 @@ def _call_groq(client: Groq, prompt: str) -> dict:
     return json.loads(text, strict=False)
 
 
+def _call_ollama(prompt: str) -> dict:
+    """로컬 Ollama API 호출 후 JSON 파싱"""
+    base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+    model = os.getenv("OLLAMA_MODEL", "qwen2.5:7b-instruct")
+    timeout = int(os.getenv("OLLAMA_TIMEOUT", "300"))
+    num_ctx = int(os.getenv("OLLAMA_NUM_CTX", "8192"))
+
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "format": "json",
+        "stream": False,
+        "options": {
+            "temperature": 0.2,
+            "num_ctx": num_ctx,
+        },
+    }
+    request = urllib.request.Request(
+        f"{base_url}/api/chat",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"Ollama API 호출 실패: {e}") from e
+
+    content = data.get("message", {}).get("content", "")
+    if not content:
+        raise ValueError("Ollama 응답에 message.content가 없습니다")
+    return _parse_json_text(content.strip())
+
+
+def _provider_order() -> list[str]:
+    """환경변수 기준 provider 실행 순서 반환"""
+    primary = os.getenv("LLM_PROVIDER", "groq").strip().lower()
+    fallback = os.getenv("LLM_FALLBACK_PROVIDER", "").strip().lower()
+    providers = [primary]
+    if fallback and fallback not in providers:
+        providers.append(fallback)
+    return providers
+
+
+def _call_provider(provider: str, prompt: str) -> dict:
+    """단일 provider 호출"""
+    if provider == "ollama":
+        return _call_ollama(prompt)
+    if provider == "groq":
+        client = Groq(api_key=os.environ["GROQ_API_KEY"])
+        return _call_groq(client, prompt)
+    raise ValueError(f"지원하지 않는 LLM_PROVIDER: {provider}")
+
+
+def _validate_articles_result(result: dict, expected_count: Optional[int] = None) -> None:
+    """개별 글 요약 응답 shape 검증"""
+    if not isinstance(result, dict):
+        raise ValueError("LLM 응답이 JSON 객체가 아닙니다")
+    articles = result.get("articles")
+    if not isinstance(articles, list):
+        raise ValueError("LLM 응답에 articles 배열이 없습니다")
+    if expected_count is not None and len(articles) != expected_count:
+        raise ValueError(
+            f"LLM 응답 articles 개수가 맞지 않습니다: "
+            f"expected={expected_count}, actual={len(articles)}"
+        )
+    for i, article in enumerate(articles, 1):
+        if not isinstance(article, dict):
+            raise ValueError(f"articles[{i}]가 JSON 객체가 아닙니다")
+        if not article.get("title"):
+            raise ValueError(f"articles[{i}]에 title이 없습니다")
+        if not article.get("summary"):
+            raise ValueError(f"articles[{i}]에 summary가 없습니다")
+        if not isinstance(article.get("keywords"), list):
+            raise ValueError(f"articles[{i}]에 keywords 배열이 없습니다")
+    if "trend_summary" not in result:
+        raise ValueError("LLM 응답에 trend_summary가 없습니다")
+
+
+def _validate_trend_result(result: dict) -> None:
+    """통합 트렌드 응답 shape 검증"""
+    if not isinstance(result, dict):
+        raise ValueError("LLM 응답이 JSON 객체가 아닙니다")
+    if not result.get("trend_summary"):
+        raise ValueError("LLM 응답에 trend_summary가 없습니다")
+
+
+def _call_llm(prompt: str, validator) -> dict:
+    """provider 순서대로 호출하고 실패 시 fallback"""
+    providers = _provider_order()
+    errors = []
+    for idx, provider in enumerate(providers):
+        try:
+            result = _call_provider(provider, prompt)
+            validator(result)
+            if len(providers) > 1:
+                print(f"  LLM provider: {provider}")
+            return result
+        except Exception as e:
+            errors.append(f"{provider}: {e}")
+            if idx < len(providers) - 1:
+                print(f"  ⚠️ {provider} 실패, fallback 시도: {e}")
+                continue
+            raise RuntimeError("; ".join(errors)) from e
+
+
 def summarize_articles(articles: list[dict]) -> dict:
-    """Groq을 사용하여 글 일괄 요약. 글이 많으면 배치 분할."""
-    client = Groq(api_key=os.environ["GROQ_API_KEY"])
+    """설정된 LLM provider를 사용하여 글 일괄 요약. 글이 많으면 배치 분할."""
 
     # 배치 분할
     batches = [
@@ -213,7 +328,13 @@ def summarize_articles(articles: list[dict]) -> dict:
             article_count=len(batch),
         )
 
-        result = _call_groq(client, prompt)
+        result = _call_llm(
+            prompt,
+            lambda value, expected_count=len(batch): _validate_articles_result(
+                value,
+                expected_count=expected_count,
+            ),
+        )
         batch_summaries = _reorder_summaries(batch, result.get("articles", []))
         all_summaries.extend(batch_summaries)
 
@@ -229,7 +350,7 @@ def summarize_articles(articles: list[dict]) -> dict:
             count=len(all_summaries),
             summaries_text=summaries_text,
         )
-        trend_result = _call_groq(client, trend_prompt)
+        trend_result = _call_llm(trend_prompt, _validate_trend_result)
         trend_summary = trend_result.get("trend_summary", "")
 
     return {
