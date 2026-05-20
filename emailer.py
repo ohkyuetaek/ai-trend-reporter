@@ -1,7 +1,9 @@
 """Gmail SMTP를 통한 브리핑 이메일 발송"""
 
+import base64
 import os
 import smtplib
+import subprocess
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
@@ -89,7 +91,7 @@ def build_html(
     return html
 
 
-def send_email(subject: str, html_body: str):
+def _send_email_smtp(subject: str, html_body: str):
     """Gmail SMTP로 이메일 발송"""
     gmail_address = os.environ["GMAIL_ADDRESS"].strip().replace("\xa0", "")
     gmail_password = os.environ["GMAIL_APP_PASSWORD"].strip().replace("\xa0", "").replace(" ", "")
@@ -105,3 +107,62 @@ def send_email(subject: str, html_body: str):
         server.starttls()
         server.login(gmail_address, gmail_password)
         server.sendmail(gmail_address, recipient, msg.as_string())
+
+
+def _send_email_github_actions(subject: str, html_body: str):
+    """GitHub Actions에 저장된 Gmail secrets를 사용해 이메일만 발송한다.
+
+    로컬 Mac의 Gmail 앱 비밀번호가 오래되었더라도, 기존 Groq 기반 workflow에서
+    검증된 GitHub repository secrets를 재사용한다. 요약은 로컬 Ollama가 수행하므로
+    Groq API 비용은 발생하지 않는다.
+    """
+    repo = os.getenv("GITHUB_EMAIL_REPO", "ohkyuetaek/ai-trend-reporter")
+    workflow = os.getenv("GITHUB_EMAIL_WORKFLOW", "send-email.yml")
+    html_b64 = base64.b64encode(html_body.encode("utf-8")).decode("ascii")
+
+    result = subprocess.run(
+        [
+            "gh",
+            "workflow",
+            "run",
+            workflow,
+            "--repo",
+            repo,
+            "--field",
+            f"subject={subject}",
+            "--field",
+            f"html_b64={html_b64}",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip()
+        raise RuntimeError(f"GitHub Actions 이메일 발송 workflow dispatch 실패: {detail}")
+
+
+def send_email(subject: str, html_body: str):
+    """이메일 발송.
+
+    기본은 직접 Gmail SMTP이며, EMAIL_FALLBACK_PROVIDER=github_actions이면
+    SMTP 인증 실패 시 GitHub Actions secrets 기반 발송으로 재시도한다.
+    EMAIL_PROVIDER=github_actions이면 처음부터 GitHub Actions 경로를 사용한다.
+    """
+    provider = os.getenv("EMAIL_PROVIDER", "smtp").strip().lower()
+    fallback = os.getenv("EMAIL_FALLBACK_PROVIDER", "").strip().lower()
+
+    if provider == "github_actions":
+        _send_email_github_actions(subject, html_body)
+        return
+    if provider != "smtp":
+        raise ValueError(f"지원하지 않는 EMAIL_PROVIDER: {provider}")
+
+    try:
+        _send_email_smtp(subject, html_body)
+    except smtplib.SMTPAuthenticationError:
+        if fallback == "github_actions":
+            print("  ⚠️ 로컬 SMTP 인증 실패, GitHub Actions secrets로 이메일 발송 재시도")
+            _send_email_github_actions(subject, html_body)
+            return
+        raise
