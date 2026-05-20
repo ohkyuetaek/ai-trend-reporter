@@ -1,0 +1,50 @@
+name: Send AI Briefing Email
+
+on:
+  workflow_dispatch:
+    inputs:
+      subject:
+        description: Email subject
+        required: true
+        type: string
+      html_b64:
+        description: Base64-encoded HTML email body
+        required: true
+        type: string
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send email through Gmail SMTP
+        env:
+          GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
+          EMAIL_SUBJECT: ${{ inputs.subject }}
+          EMAIL_HTML_B64: ${{ inputs.html_b64 }}
+        run: |
+          python - <<'PY'
+          import base64
+          import os
+          import smtplib
+          from email.mime.multipart import MIMEMultipart
+          from email.mime.text import MIMEText
+
+          gmail_address = os.environ["GMAIL_ADDRESS"].strip().replace("\xa0", "")
+          gmail_password = os.environ["GMAIL_APP_PASSWORD"].strip().replace("\xa0", "").replace(" ", "")
+          recipient = os.environ["RECIPIENT_EMAIL"].strip().replace("\xa0", "")
+          subject = os.environ["EMAIL_SUBJECT"]
+          html_body = base64.b64decode(os.environ["EMAIL_HTML_B64"]).decode("utf-8")
+
+          msg = MIMEMultipart("alternative")
+          msg["Subject"] = subject
+          msg["From"] = gmail_address
+          msg["To"] = recipient
+          msg.attach(MIMEText(html_body, "html", "utf-8"))
+
+          with smtplib.SMTP("smtp.gmail.com", 587) as server:
+              server.starttls()
+              server.login(gmail_address, gmail_password)
+              server.sendmail(gmail_address, recipient, msg.as_string())
+          PY
