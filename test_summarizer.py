@@ -105,6 +105,15 @@ class TestProviderFallback:
             "source": "pytorch_kr",
         }
 
+    def test_default_provider_is_ollama_without_fallback(self, monkeypatch):
+        """API 비용 0 운영을 위해 기본 provider는 Ollama 단독이다."""
+        import summarizer
+
+        monkeypatch.delenv("LLM_PROVIDER", raising=False)
+        monkeypatch.delenv("LLM_FALLBACK_PROVIDER", raising=False)
+
+        assert summarizer._provider_order() == ["ollama"]
+
     def test_ollama_success_does_not_call_groq(self, monkeypatch):
         """Ollama가 유효한 JSON을 반환하면 Groq fallback을 호출하지 않는다."""
         import summarizer

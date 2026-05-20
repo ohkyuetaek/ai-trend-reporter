@@ -1,10 +1,10 @@
-name: Daily AI Briefing
+name: Daily AI Briefing Legacy API Run
 
+# 기본 운영은 로컬 Mac + Ollama입니다.
+# 이 workflow는 로컬 Ollama에 접근할 수 없으므로 자동 schedule을 비활성화했습니다.
+# 수동 실행 시 Groq API를 사용하므로 API 사용량 과금 가능성이 있습니다.
 on:
-  schedule:
-    # 오전 7시 KST = UTC 22:00 (전날)
-    - cron: '0 22 * * 0-4'  # 일~목 22:00 UTC = 월~금 07:00 KST
-  workflow_dispatch: # 수동 실행 가능
+  workflow_dispatch:
 
 jobs:
   briefing:
@@ -17,6 +17,8 @@ jobs:
       - run: pip install -r requirements.txt
       - run: python main.py
         env:
+          LLM_PROVIDER: groq
+          LLM_FALLBACK_PROVIDER: ""
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}

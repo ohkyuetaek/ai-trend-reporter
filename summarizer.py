@@ -201,7 +201,7 @@ def _parse_json_text(text: str) -> dict:
 def _call_ollama(prompt: str) -> dict:
     """로컬 Ollama API 호출 후 JSON 파싱"""
     base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
-    model = os.getenv("OLLAMA_MODEL", "qwen2.5:7b-instruct")
+    model = os.getenv("OLLAMA_MODEL", "qwen2.5:14b")
     timeout = int(os.getenv("OLLAMA_TIMEOUT", "300"))
     num_ctx = int(os.getenv("OLLAMA_NUM_CTX", "8192"))
 
@@ -236,7 +236,7 @@ def _call_ollama(prompt: str) -> dict:
 
 def _provider_order() -> list[str]:
     """환경변수 기준 provider 실행 순서 반환"""
-    primary = os.getenv("LLM_PROVIDER", "groq").strip().lower()
+    primary = os.getenv("LLM_PROVIDER", "ollama").strip().lower()
     fallback = os.getenv("LLM_FALLBACK_PROVIDER", "").strip().lower()
     providers = [primary]
     if fallback and fallback not in providers:
