@@ -81,6 +81,7 @@ OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=qwen2.5:14b
 OLLAMA_NUM_CTX=8192
 OLLAMA_TIMEOUT=550
+LLM_BATCH_SIZE=5
 GMAIL_ADDRESS=your-gmail@gmail.com
 GMAIL_APP_PASSWORD=your-16-char-app-password
 RECIPIENT_EMAIL=recipient@example.com
@@ -132,3 +133,4 @@ python -m pytest -q
 - Mac이 켜져 있고 네트워크에 연결되어 있어야 메일 발송까지 완료됩니다.
 - Ollama 서버가 실행 중이어야 합니다.
 - 모델 응답이 JSON 파싱 또는 shape validation에 실패하면 현재 기본 구성에서는 API fallback 없이 오류 이메일을 보냅니다. 이는 추가 API 비용을 막기 위한 의도적 동작입니다.
+- `LLM_BATCH_SIZE=5`가 기본입니다. 로컬 모델 타임아웃이 나면 더 낮추고, 시간이 너무 오래 걸리면 품질을 확인한 뒤 7~10 정도로 올려볼 수 있습니다.

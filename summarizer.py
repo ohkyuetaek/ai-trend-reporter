@@ -135,7 +135,7 @@ def _reorder_summaries(
     return reordered
 
 
-BATCH_SIZE = 15  # 배치당 최대 글 수 (출력 토큰 초과 방지)
+BATCH_SIZE = int(os.getenv("LLM_BATCH_SIZE", "5"))  # 로컬 Ollama 안정성을 위해 기본 5개씩 처리
 
 TREND_PROMPT_TEMPLATE = """\
 당신은 AI/ML 및 기술 트렌드 분석가입니다.
