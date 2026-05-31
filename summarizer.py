@@ -81,25 +81,62 @@ def _normalize_title(title: str) -> str:
     return title
 
 
+def _coerce_summary_item(summary: dict) -> dict | None:
+    """LLM 개별 요약을 이메일 렌더링 가능한 최소 shape로 정리.
+
+    summary가 없거나 비어 있는 항목은 원문 폴백이 동작하도록 제외한다.
+    title은 article_id 매칭 시 필수는 아니므로 없으면 빈 문자열로 둔다.
+    """
+    if not isinstance(summary, dict):
+        return None
+
+    summary_text = summary.get("summary")
+    if summary_text is None:
+        return None
+    summary_text = str(summary_text).strip()
+    if not summary_text:
+        return None
+
+    title = summary.get("title", "")
+    title = str(title).strip() if title is not None else ""
+
+    keywords = summary.get("keywords", [])
+    if not isinstance(keywords, list):
+        keywords = []
+    keywords = [str(keyword) for keyword in keywords if keyword]
+
+    return {**summary, "title": title, "summary": summary_text, "keywords": keywords}
+
+
 def _reorder_summaries(
     original_articles: list[dict],
     llm_summaries: list[dict],
+    start_id: int = 1,
 ) -> list[dict]:
     """LLM 응답의 요약을 원본 글 순서에 맞게 재정렬.
 
     1차: article_id 기반 매칭
     2차: 제목 유사도 기반 매칭 (폴백)
+
+    start_id는 프롬프트에 부여한 첫 article_id이다. 여러 배치로 나누는 경우
+    2번째 배치부터 article_id가 1이 아니라 6, 11...처럼 이어진다.
     """
-    # article_id 기반 매핑 (1-indexed)
+    clean_summaries = [
+        clean
+        for summary in llm_summaries
+        if (clean := _coerce_summary_item(summary)) is not None
+    ]
+
+    # article_id 기반 매핑 (프롬프트에 부여한 전역 id 기준)
     by_id: dict[int, dict] = {}
-    for s in llm_summaries:
+    for s in clean_summaries:
         aid = s.get("article_id")
         if isinstance(aid, int) and aid not in by_id:
             by_id[aid] = s
 
     # 제목 기반 매핑 (폴백용)
     by_title: dict[str, dict] = {}
-    for s in llm_summaries:
+    for s in clean_summaries:
         norm = _normalize_title(s.get("title", ""))
         if norm and norm not in by_title:
             by_title[norm] = s
@@ -108,7 +145,7 @@ def _reorder_summaries(
     used_ids: set[int] = set()
 
     for i, orig in enumerate(original_articles):
-        expected_id = i + 1  # 1-indexed
+        expected_id = start_id + i
         matched = None
 
         # 1차: article_id 매칭
@@ -261,20 +298,17 @@ def _validate_articles_result(result: dict, expected_count: Optional[int] = None
     articles = result.get("articles")
     if not isinstance(articles, list):
         raise ValueError("LLM 응답에 articles 배열이 없습니다")
-    if expected_count is not None and len(articles) != expected_count:
+    # 로컬 LLM은 간혹 article을 1개 더 만들거나 일부를 누락한다.
+    # 초과/부족은 _reorder_summaries가 article_id/title 기준 매칭 및 원문 폴백으로 복구한다.
+    # 단, 완전히 빈 articles는 요약 실패로 본다.
+    if expected_count is not None and expected_count > 0 and not articles:
         raise ValueError(
-            f"LLM 응답 articles 개수가 맞지 않습니다: "
+            f"LLM 응답 articles가 비어 있습니다: "
             f"expected={expected_count}, actual={len(articles)}"
         )
-    for i, article in enumerate(articles, 1):
-        if not isinstance(article, dict):
-            raise ValueError(f"articles[{i}]가 JSON 객체가 아닙니다")
-        if not article.get("title"):
-            raise ValueError(f"articles[{i}]에 title이 없습니다")
-        if not article.get("summary"):
-            raise ValueError(f"articles[{i}]에 summary가 없습니다")
-        if not isinstance(article.get("keywords"), list):
-            raise ValueError(f"articles[{i}]에 keywords 배열이 없습니다")
+    # 개별 article shape는 여기서 실패시키지 않는다. 로컬 LLM이 간혹 title/summary/keywords를
+    # 누락하거나 article을 초과 생성하므로, _reorder_summaries에서 usable 항목만 쓰고
+    # 나머지는 원문 snippet으로 폴백한다.
     if "trend_summary" not in result:
         raise ValueError("LLM 응답에 trend_summary가 없습니다")
 
@@ -335,7 +369,14 @@ def summarize_articles(articles: list[dict]) -> dict:
                 expected_count=expected_count,
             ),
         )
-        batch_summaries = _reorder_summaries(batch, result.get("articles", []))
+        raw_summaries = result.get("articles", [])
+        if len(raw_summaries) != len(batch):
+            print(
+                "  ⚠️ LLM 응답 articles 개수 불일치: "
+                f"expected={len(batch)}, actual={len(raw_summaries)}; "
+                "article_id/title 기준으로 복구"
+            )
+        batch_summaries = _reorder_summaries(batch, raw_summaries, start_id=start_id)
         all_summaries.extend(batch_summaries)
 
     # 배치가 1개면 트렌드 요약을 그대로 사용, 여러 배치면 통합 트렌드 생성

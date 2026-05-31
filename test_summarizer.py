@@ -75,6 +75,16 @@ class TestReorderSummaries:
         result = _reorder_summaries(originals, llm_output)
         assert result[0]["summary"] == "요약"
 
+    def test_reorder_with_non_one_start_id(self):
+        """2번째 이후 배치의 전역 article_id도 올바르게 매칭"""
+        originals = self._make_articles(["원본 A", "원본 B"])
+        llm_output = [
+            {"article_id": 7, "title": "제목이 바뀐 B", "summary": "요약B", "keywords": ["b"]},
+            {"article_id": 6, "title": "제목이 바뀐 A", "summary": "요약A", "keywords": ["a"]},
+        ]
+        result = _reorder_summaries(originals, llm_output, start_id=6)
+        assert [r["summary"] for r in result] == ["요약A", "요약B"]
+
     def test_wrong_article_id_corrected_by_title(self):
         """article_id가 잘못되었지만 제목으로 복구"""
         originals = self._make_articles(["글A", "글B"])
@@ -148,6 +158,70 @@ class TestProviderFallback:
         assert result["trend_summary"] == "로컬 요약 성공"
         assert result["articles"][0]["summary"] == "새 기능 발표 요약"
         assert calls == ["ollama"]
+
+    def test_ollama_success_ignores_extra_articles_without_groq(self, monkeypatch):
+        """Ollama가 article을 초과 반환해도 필요한 글만 사용하고 실패하지 않는다."""
+        import summarizer
+
+        calls = []
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        monkeypatch.delenv("LLM_FALLBACK_PROVIDER", raising=False)
+
+        def fake_ollama(prompt):
+            calls.append("ollama")
+            return {
+                "trend_summary": "로컬 요약 성공",
+                "articles": [
+                    {
+                        "article_id": 1,
+                        "title": "테스트 글",
+                        "summary": "필요한 요약",
+                        "keywords": ["PyTorch"],
+                    },
+                    {
+                        "article_id": 2,
+                        "title": "환각으로 추가된 글",
+                        "summary": "버려야 하는 요약",
+                        "keywords": ["extra"],
+                    },
+                ],
+            }
+
+        monkeypatch.setattr(summarizer, "_call_ollama", fake_ollama)
+
+        result = summarizer.summarize_articles([self._article()])
+
+        assert result["trend_summary"] == "로컬 요약 성공"
+        assert [a["summary"] for a in result["articles"]] == ["필요한 요약"]
+        assert calls == ["ollama"]
+
+    def test_ollama_missing_summary_falls_back_to_original_content(self, monkeypatch):
+        """Ollama가 summary 필드를 빠뜨린 글은 원문 폴백으로 브리핑을 계속 만든다."""
+        import summarizer
+
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        monkeypatch.delenv("LLM_FALLBACK_PROVIDER", raising=False)
+
+        def fake_ollama(prompt):
+            return {
+                "trend_summary": "로컬 트렌드 요약",
+                "articles": [
+                    {
+                        "article_id": 1,
+                        "title": "테스트 글",
+                        "keywords": ["PyTorch"],
+                    }
+                ],
+            }
+
+        monkeypatch.setattr(summarizer, "_call_ollama", fake_ollama)
+
+        result = summarizer.summarize_articles([self._article()])
+
+        assert result["trend_summary"] == "로컬 트렌드 요약"
+        assert result["articles"][0]["title"] == "테스트 글"
+        assert result["articles"][0]["summary"] == "PyTorch가 새 기능을 발표했다."
+        assert result["articles"][0]["keywords"] == []
 
     def test_ollama_failure_falls_back_to_groq(self, monkeypatch):
         """Ollama 호출이 실패하면 Groq provider로 재시도한다."""
